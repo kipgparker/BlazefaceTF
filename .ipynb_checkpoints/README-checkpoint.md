@@ -3,12 +3,13 @@
 Unofficial Tensorflow implementation of [BlazeFace](https://sites.google.com/view/perception-cv4arvr/blazeface)
  
  ```python
-import torch
+import numpy
 from blazeface import BlazeFace
 
-x = torch.randn(1, 3, 128, 128)
 model = BlazeFace()
-h = model(x)
+
+x = np.random.uniform(0, 255, (1,128,128,3))
+predictions = model(x)
 ```
 
 ## Paper
