@@ -1,20 +1,22 @@
 import tensorflow as tf
 from tensorflow.keras.models import *
 from tensorflow.keras.layers import *
+from tensorflow.keras import regularizers
+from tensorflow.keras.optimizers import *
 import numpy as np
 
-class BlazeFace:
-    def __init__(self, anchors_dir, weights_dir, size = (128,128)):
-        self.x_scale = size[1]
-        self.w_scale = size[1]
-        self.y_scale = size[0]
-        self.h_scale = size[0]
+class FaceExtractor:
+    def __init__(self, anchors_dir, weights_dir, size):
+        self.x_scale = 128.0
+        self.y_scale = 128.0
+        self.h_scale = 128.0
+        self.w_scale = 128.0
         self.anchors = np.load(anchors_dir)
 
         self.blazeface = self.blazeFace()
         self.blazeface.load_weights(weights_dir)
 
-    def blazeBlock(self,inp, out, x, stride = 1):#Blazeblock 
+    def blazeBlock(self,inp, out, x, stride = 1):
         channel_pad = out - inp
         if(stride == 2):
             y = DepthwiseConv2D((3, 3), strides=(2, 2), padding = "SAME")(x)
@@ -57,6 +59,8 @@ class BlazeFace:
         x = self.backbone1(inputs)
         h = self.backbone2(x)
 
+        ###ODERING OF THESE*****
+
         c1 = Conv2D(2, (1, 1), name = 'classifier_8')(x)
         c1 = Reshape((512,1))(c1)
         c2 = Conv2D(6, (1, 1), name = 'classifier_16')(h)
@@ -68,20 +72,22 @@ class BlazeFace:
         r2 = Conv2D(96, (1, 1), name = 'regressor_16')(h)
         r2 = Reshape((384,16))(r2)
         r = concatenate([r1,r2], axis = 1)
-    
-        #I believe the standard ordering returns [r,c] but due to the ordering of the weights, it needs to be this way round
+
         model = Model(inputs=[inputs], outputs=[c, r])
         return model
     
     def preprocess(self, x):
         return np.array(x, dtype = np.float32) / 127.5 - 1.0
-    
-    def predict(self, x, max_faces=10, iou_threshold = 0.2, score_threshold = 0.01, soft_nms_sigma=0.2):
-        
+
+    def predict(self, x, offset):
+
+        s = offset.shape[0]
+        n = x.shape[0]//s
+
         x = self.preprocess(x)
         raw_scores, raw_boxes = self.blazeface.predict(x)
 
-        boxes = np.empty_like(raw_boxes)
+        boxes = np.empty_like(raw_boxes)[:,:,:4]
         x_center = raw_boxes[..., 0] / self.x_scale * self.anchors[:, 2] + self.anchors[:, 0]
         y_center = raw_boxes[..., 1] / self.x_scale * self.anchors[:, 3] + self.anchors[:, 1]
         w = raw_boxes[..., 2] / self.w_scale * self.anchors[:, 2]
@@ -90,25 +96,25 @@ class BlazeFace:
         boxes[..., 1] = x_center - w / 2.  # xmin
         boxes[..., 2] = y_center + h / 2.  # ymax
         boxes[..., 3] = x_center + w / 2.  # xmax
-        
-        for k in range(6):
-            offset = 4 + k*2
-            keypoint_x = raw_boxes[..., offset    ] / self.x_scale * self.anchors[:, 2] + self.anchors[:, 0]
-            keypoint_y = raw_boxes[..., offset + 1] / self.y_scale * self.anchors[:, 3] + self.anchors[:, 1]
-            boxes[..., offset    ] = keypoint_x
-            boxes[..., offset + 1] = keypoint_y
-            
-        selected_indices, selected_scores = tf.image.non_max_suppression_with_scores(
-                tf.squeeze(boxes[:,:,:4]),
-                tf.squeeze(raw_scores),
-                max_faces,
-                iou_threshold = iou_threshold,
-                score_threshold = score_threshold,
-                soft_nms_sigma = soft_nms_sigma
-                )
-        
-        selected_boxes = tf.gather(boxes, selected_indices)
-        
-        return selected_indices
+
+        for i in range (n):
+            f = i * s
+            for o in range(offset.shape[0]):
+                boxes[o+f,...,0] += offset[o,0]
+                boxes[o+f,...,1] += offset[o,1]
+                boxes[o+f,...,2] += offset[o,0]
+                boxes[o+f,...,3] += offset[o,1]
+
+        combined_boxes = tf.reshape(boxes, (n, offset.shape[0]*boxes.shape[1],4))
+        scores = tf.reshape(raw_scores, (n, offset.shape[0]*raw_scores.shape[1]))
+
+        return [tf.gather(combined_boxes[i], tf.image.non_max_suppression_with_scores(
+                combined_boxes[i],
+                scores[i],
+                15,
+                iou_threshold=0.2,
+                score_threshold=0.001,
+                soft_nms_sigma=0.2
+                )[0]) for i in range(n)]
 
 
