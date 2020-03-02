@@ -12,6 +12,12 @@ x = np.random.uniform(0, 255, (1,128,128,3))
 predictions = model(x)
 ```
 
+##  Dependiencies
+
+* Tensorflow (2.0.0)
+* Keras
+* Numpy
+
 ## Paper
 ### BlazeFace: Sub-millisecond Neural Face Detection on Mobile GPUs
 [[Project Page]](https://sites.google.com/view/perception-cv4arvr/blazeface)
