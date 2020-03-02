@@ -7,12 +7,8 @@ import numpy as np
 
 class BlazeFace:
     def __init__(self):
-        self.x_scale = 128.0
-        self.y_scale = 128.0
-        self.h_scale = 128.0
-        self.w_scale = 128.0
+        self.scale = 128.0
         self.anchors = np.load('anchors.npy')
-
         self.blazeface = self.blazeFace()
         self.blazeface.load_weights('model_weights.h5')
 
@@ -79,30 +75,27 @@ class BlazeFace:
     def preprocess(self, x):
         return np.array(x, dtype = np.float32) / 127.5 - 1.0
 
-    def predict(self, x):
+    def predict(self, x, iou_threshold=0.5, score_threshold=0.1, soft_nms_sigma=0.5):
 
         x = self.preprocess(x)
         raw_scores, raw_boxes = self.blazeface.predict(x)
 
-        boxes = np.empty_like(raw_boxes)[0,:,:4]
-        x_center = raw_boxes[..., 0] / self.x_scale * self.anchors[:, 2] + self.anchors[:, 0]
-        y_center = raw_boxes[..., 1] / self.x_scale * self.anchors[:, 3] + self.anchors[:, 1]
-        w = raw_boxes[..., 2] / self.w_scale * self.anchors[:, 2]
-        h = raw_boxes[..., 3] / self.h_scale * self.anchors[:, 3]
+        boxes = np.empty_like(raw_boxes)[:,:,:4]
+        x_center = raw_boxes[..., 0] / self.scale * self.anchors[:, 2] + self.anchors[:, 0]
+        y_center = raw_boxes[..., 1] / self.scale * self.anchors[:, 3] + self.anchors[:, 1]
+        w = raw_boxes[..., 2] / self.scale * self.anchors[:, 2]
+        h = raw_boxes[..., 3] / self.scale * self.anchors[:, 3]
         boxes[..., 0] = y_center - h / 2.  # ymin
         boxes[..., 1] = x_center - w / 2.  # xmin
         boxes[..., 2] = y_center + h / 2.  # ymax
         boxes[..., 3] = x_center + w / 2.  # xmax
 
-        selected_indices, selected_scores = tf.image.non_max_suppression_with_scores(
-            boxes, 
-            np.squeeze(raw_scores), 
-            15, 
-            iou_threshold=0.5, 
-            score_threshold=0.001,
-            soft_nms_sigma=0.0)
-
-        selected_boxes = tf.gather(boxes, selected_indices)
-        
-        return selected_boxes
+        return [tf.gather(boxes[i], tf.image.non_max_suppression_with_scores(
+                boxes[i],
+                np.squeeze(raw_scores[i]),
+                5,
+                iou_threshold=iou_threshold,
+                score_threshold=score_threshold,
+                soft_nms_sigma=soft_nms_sigma
+                )[0]) for i in range(x.shape[0])]
 
